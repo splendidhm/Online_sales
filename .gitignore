@@ -1,0 +1,3 @@
+/data/*
+!/data/run-desk-demo.cjs
+!/data/desk-trio-demo.jpg
