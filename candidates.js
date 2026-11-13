@@ -1,7 +1,7 @@
 "use strict";
 if(location.protocol==="http:"){
   el("candidates").hidden=false;
-  if(location.hash.length>1){
+  if(location.hash.length>1&&!["#sourcing","#worksheet","#candidates","#operations"].includes(location.hash)){
     sessionStorage.setItem("acc.admin",location.hash.slice(1));
     history.replaceState(null,"",location.pathname);
   }
@@ -30,30 +30,43 @@ if(location.protocol==="http:"){
     }catch(e){el("researchStatus").textContent=e.message;}finally{button.disabled=false;}
   };
   const openStudio=detailEditor(api);
+  el("demoProduct").onclick=async()=>{
+    const b=el("demoProduct");b.disabled=true;
+    try{
+      const {id}=await api("/api/demo",{mode:"fixture"});
+      if(el("mode").value==="fixture"){await refresh();await openStudio(id);}
+    }catch(e){batchMessage(e.message);}finally{b.disabled=false;}
+  };
+  operationsPanel(api);
+  api("/api/connections").then(result=>{
+    const names={supplier:"도매매",research:"시장조사",content:"AI 제작·검수",naver:"스마트스토어",coupang:"쿠팡",gmarket:"G마켓"};
+    el("connections").textContent=Object.entries(result).map(([k,v])=>names[k]+" "+(v?"설정됨":"미설정")).join(" · ");
+  }).catch(e=>{el("connections").textContent=e.message;});
   function alertMessage(text){el("notice").textContent=text;}
   let batch=null, visibleCount=20, batchRequest=0;
   const batchMessage=text=>{el("batchSummary").textContent=text;};
   async function inspectProduct(product){
     const channel=el("channel").value;
-    const rows=await api("/api/candidates?mode=fixture");
-    if(el("mode").value!=="fixture" || el("channel").value!==channel)return;
+    const mode=el("mode").value;
+    const rows=await api("/api/candidates?mode="+mode);
+    if(el("mode").value!==mode || el("channel").value!==channel)return;
     const existing=rows.find(row=>row.channel===channel && row.input.source===product.source && row.input.option===product.option);
     if(existing){openRow(existing);return;}
-    opened={mode:"fixture",channel,id:0,batchId:Number(el("batchHistory").value),input:{option:product.option,source:product.source,name:product.name}};
+    opened={mode,channel,id:0,batchId:Number(el("batchHistory").value),input:{option:product.option,source:product.source,name:product.name}};
     for(const [key,input] of Object.entries(fields))input.value=product[key]??"";
     samples=[];el("checks").checked=false;save();render();
     fields.maker.focus();
-    alertMessage("모의 공급 조건을 불러왔습니다. 판매 조건과 비교 표본을 입력하세요.");
+    alertMessage("공급 조건을 불러왔습니다. 판매 조건과 비교 표본을 입력하세요.");
   }
   function displayBatch(){
     el("batchRows").replaceChildren();el("showMore").hidden=true;
-    if(!batch){batchMessage("수집 수량을 입력해 첫 모의 회차를 만드세요.");return;}
+    if(!batch){batchMessage("저장된 수집 회차가 없습니다.");return;}
     batchMessage(Object.entries(batch.counts).map(([label,count])=>label+" "+count+"건").join(" · "));
     const rows=batch.rows.filter(row=>row.status===el("batchFilter").value);
     for(const product of rows.slice(0,visibleCount)){
       const li=document.createElement("li");
-      li.textContent=[product.name,product.option,won(product.cost),product.reason].join(" · ");
-      if(product.status==="조사 대상"){
+      li.textContent=[product.name,product.option,product.cost==null?"매입가 미확인":won(product.cost),product.reason].join(" · ");
+      if(product.status==="조사 대상"||el("mode").value==="manual"&&product.status==="보완"){
         const button=document.createElement("button");button.textContent="계산서 열기";
         button.onclick=()=>inspectProduct(product).catch(e=>batchMessage(e.message));
         li.append(button);
@@ -65,12 +78,14 @@ if(location.protocol==="http:"){
   }
   async function readBatch(){
     const ticket=++batchRequest, id=el("batchHistory").value;
-    const snapshot=id ? await api("/api/batches?id="+encodeURIComponent(id)) : null;
+    const snapshot=id ? await api("/api/batches?mode="+el("mode").value+"&id="+encodeURIComponent(id)) : null;
     if(ticket!==batchRequest)return;
     batch=snapshot;visibleCount=20;displayBatch();
   }
   async function historyList(id){
-    const history=await api("/api/batches");
+    const mode=el("mode").value;
+    const history=await api("/api/batches?mode="+mode);
+    if(mode!==el("mode").value)return;
     el("batchHistory").replaceChildren(...history.map(row=>new Option(row.id+"회차 · "+row.total+"건",row.id)));
     if(id)el("batchHistory").value=id;
     await readBatch();
@@ -78,16 +93,41 @@ if(location.protocol==="http:"){
   el("batchForm").onsubmit=async event=>{
     event.preventDefault();el("collect").disabled=true;
     try{
-      const result=await api("/api/batches",{limit:Number(el("batchLimit").value)});
+      const mode=el("mode").value;
+      let payload={mode,limit:Number(el("batchLimit").value)};
+      if(mode==="manual"){
+        const file=el("supplierFile").files[0];
+        if(!file)throw Error("공급처 JSON 파일을 선택하세요.");
+        payload={mode,items:JSON.parse(await file.text())};
+      }
+      const result=await api("/api/batches",payload);
+      if(mode!==el("mode").value)return;
       el("batchFilter").value="조사 대상";await historyList(result.id);
     }catch(e){batchMessage(e.message);}finally{el("collect").disabled=false;}
   };
   el("batchHistory").onchange=()=>readBatch().catch(e=>batchMessage(e.message));
+  el("supplierSearch").onsubmit=async event=>{
+    event.preventDefault();
+    const form=event.currentTarget;form.inert=true;
+    try{
+      const result=await api("/api/batches",{mode:"manual",provider:"domeme",keyword:el("supplierQuery").value,limit:Number(el("supplierCount").value)});
+      if(el("mode").value==="manual"){
+        el("batchFilter").value=result.counts["조사 대상"]?"조사 대상":"보완";await historyList(result.id);
+      }
+    }catch(e){batchMessage(e.message);}finally{form.inert=false;}
+  };
   el("batchFilter").onchange=()=>{visibleCount=20;displayBatch();};
   el("showMore").onclick=()=>{visibleCount+=20;displayBatch();};
-  function showSourcing(){el("sourcing").hidden=el("mode").value!=="fixture";}
+  function showSourcing(){
+    const manual=el("mode").value==="manual";
+    el("demoProduct").hidden=manual;
+    el("supplierSearch").hidden=!manual;
+    el("sourcing").hidden=false;el("supplierLabel").hidden=!manual;el("batchLimit").parentElement.hidden=manual;
+    el("collect").textContent=manual?"공급 자료 선별":"모의 회차 생성";
+    batchRequest++;batch=null;displayBatch();
+    historyList().catch(e=>batchMessage(e.message));
+  }
   el("mode").addEventListener("change",showSourcing);showSourcing();
-  historyList().catch(e=>batchMessage(e.message));
   function openRow(row){
     opened=row;
     el("channel").value=row.channel;
@@ -105,7 +145,7 @@ if(location.protocol==="http:"){
       const tr=el("rows").insertRow();
       const assessment=row.result.assessment;
       const total=assessment?.total;
-      for(const text of [row.input.name+" · "+row.input.option,row.channel,row.result.version===2?(row.result.reference===null?"조사 대기":won(row.result.reference)):won(Number(row.input.price))+" (이전)",row.result.profit===null?"산출 대기":won(row.result.profit)+" ("+row.result.margin.toFixed(1)+"%)",row.result.prices.length+"건",assessment?.strength??"미평가",assessment?assessment.coverage+"%":"미평가",total==null?"평가 대기":total+"점",row.choice??"검토 대기"])tr.insertCell().textContent=text;
+      for(const text of [row.input.name+" · "+row.input.option,row.channel,row.result.version>=2?(row.result.reference===null?"조사 대기":won(row.result.reference)):won(Number(row.input.price))+" (이전)",row.result.profit===null?"산출 대기":won(row.result.profit)+" ("+row.result.margin.toFixed(1)+"%)",row.result.prices.length+"건",assessment?.strength??"미평가",assessment?assessment.coverage+"%":"미평가",total==null?"평가 대기":total+"점",row.choice??"검토 대기"])tr.insertCell().textContent=text;
       const actions=tr.insertCell();
       function button(label,click){const b=document.createElement("button");b.textContent=label;b.onclick=async()=>{try{await click();}catch(e){alertMessage(e.message);}};actions.append(b);}
       button("열기",()=>openRow(row));
@@ -128,7 +168,7 @@ if(location.protocol==="http:"){
         opened.input.option===input.option && opened.input.source===input.source &&
         (input.source || opened.input.name===input.name);
       const payload={input,channel,mode,samples:structuredClone(samples),checks:el("checks").checked,base:same?opened.id:0,review:Boolean(same && opened.choice)};
-      if(same && opened.batchId)payload.batchId=opened.batchId;
+      if(opened?.batchId&&opened.input.source===input.source&&(same||!opened.id&&!opened.input.option))payload.batchId=opened.batchId;
       const {id}=await api("/api/candidates",payload);
       opened={...payload,id};await refresh();alertMessage("계산서 "+id+"번을 저장했습니다.");
     }catch(e){alertMessage(e.message);}

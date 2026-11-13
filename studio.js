@@ -2,12 +2,20 @@ function textValue(value){return typeof value==="string"?value.trim():"";}
 
 function generateDraft(candidate){
   const {input}=candidate;
-  return {title:[input.name,input.option].join(" "),body:[input.name,"구성 · "+input.option,input.model && "모델 · "+input.model].filter(Boolean).join("\n"),
-    origin:"",disclosure:"",returns:"",source:input.source||"",rights:"",image:"",imageText:"",imageReviewed:false};
+  const evidence=candidate.evidence??{};
+  return {title:[input.name,input.option].join(" "),body:[input.name,"구성 · "+input.option,input.model && "모델 · "+input.model,evidence.body].filter(Boolean).join("\n"),
+    stock:"",marketProfile:"",origin:evidence.origin||"",disclosure:evidence.disclosure||"",returns:evidence.returns||"",source:input.source||"",rights:evidence.rights||"",image:"",imageText:"",imageReviewed:false};
 }
 
 function review(draft,candidate){
   const issues=[];
+  if(draft.stock && !/^[1-9]\d{0,8}$/.test(draft.stock))issues.push({field:"stock",message:"판매가능수량은 1 이상의 정수여야 합니다."});
+  if(draft.marketProfile){
+    try{
+      const profile=JSON.parse(draft.marketProfile);
+      if(!profile||typeof profile!=="object"||Array.isArray(profile))throw Error();
+    }catch{issues.push({field:"marketProfile",message:"마켓 등록 설정은 JSON 객체로 입력하세요."});}
+  }
   const flag=(field,message)=>issues.push({field,message});
   for(const [field,label] of Object.entries({title:"상품명",body:"상세 설명",origin:"원산지",disclosure:"품목별 상품정보고시",returns:"배송·반품 안내",source:"공급 정보 출처",rights:"해당 채널의 이미지 사용 근거"})){
     if(!textValue(draft[field]))flag(field,label+"를 공급 근거에서 확인해 입력하세요.");
@@ -46,6 +54,7 @@ function studioStore(db){
     CREATE INDEX IF NOT EXISTS detail_by_version ON detail_revisions(version,id);
     CREATE TABLE IF NOT EXISTS detail_approvals(revision INTEGER PRIMARY KEY, created TEXT DEFAULT CURRENT_TIMESTAMP)`);
   db.exec("CREATE TABLE IF NOT EXISTS detail_ai_reviews(revision INTEGER PRIMARY KEY, issues TEXT NOT NULL)");
+  db.exec("CREATE TABLE IF NOT EXISTS detail_decisions(id INTEGER PRIMARY KEY,revision INTEGER NOT NULL,action TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP)");
   return function handle(data,aiReview){
     const row=db.prepare(`SELECT v.*, d.choice FROM versions v LEFT JOIN decisions d ON v.id=d.version
       WHERE v.id=? AND v.id=(SELECT MAX(id) FROM versions WHERE identity=v.identity AND channel=v.channel AND mode=v.mode)`).get(data.version);
@@ -58,19 +67,30 @@ function studioStore(db){
       draft=normalize(data.draft,candidate);
       const content=JSON.stringify(draft);
       if(content!==last?.content)id=Number(db.prepare("INSERT INTO detail_revisions(version,content) VALUES(?,?)").run(row.id,content).lastInsertRowid);
-    }else if(!["open","approve","export"].includes(data.action))throw Error("지원하지 않는 편집 요청입니다.");
+    }else if(!["open","approve","revise","reject","export"].includes(data.action))throw Error("지원하지 않는 편집 요청입니다.");
     if(aiReview && id)db.prepare("INSERT OR IGNORE INTO detail_ai_reviews(revision,issues) VALUES(?,?)").run(id,JSON.stringify(aiReview));
     const issues=review(draft,candidate);
     const savedReview=db.prepare("SELECT issues FROM detail_ai_reviews WHERE revision=?").get(id);
     if(savedReview)issues.push(...JSON.parse(savedReview.issues));
     else if(require("./content-ai").configured())issues.push({field:"body",message:"현재 AI 연결로 수정본을 저장해 사진과 문안을 검수하세요."});
+    let decision=db.prepare("SELECT action FROM detail_decisions WHERE revision=? ORDER BY id DESC LIMIT 1").get(id)?.action;
+    if(["revise","reject"].includes(data.action)&&id&&decision!==data.action){
+      db.prepare("INSERT INTO detail_decisions(revision,action) VALUES(?,?)").run(id,data.action);
+      decision=data.action;
+    }
+    const withdrawn=["revise","reject"].includes(decision);
     if(data.action==="approve"){
+      if(withdrawn)throw Error("수정본을 저장한 후 다시 승인하세요.");
       if(!id||issues.length)throw Error("검수 항목을 보완하고 저장하세요.");
       db.prepare("INSERT OR IGNORE INTO detail_approvals(revision) VALUES(?)").run(id);
+      if(decision!=="approve")db.prepare("INSERT INTO detail_decisions(revision,action) VALUES(?,'approve')").run(id);
     }
-    const approved=!!db.prepare("SELECT revision FROM detail_approvals WHERE revision=?").get(id);
+    const approved=!withdrawn&&!!db.prepare("SELECT revision FROM detail_approvals WHERE revision=?").get(id);
     if(data.action==="export" && (!approved || issues.length))throw Error("현재 게시본의 검수와 2차 승인이 필요합니다.");
-    return {version:row.id,id,approved,issues,draft,channel:row.channel,mode:row.mode,option:candidate.input.option,
+    const previous=db.prepare("SELECT content FROM detail_revisions WHERE version=? AND id<? ORDER BY id DESC LIMIT 1").get(row.id,id);
+    const older=previous&&JSON.parse(previous.content);
+    const changes=older?Object.keys(draft).filter(key=>draft[key]!==older[key]).map(key=>({key,before:key==="image"?"이전 사진":older[key]??"",after:key==="image"?"변경된 사진":draft[key]})):[];
+    return {version:row.id,id,approved,withdrawn,decision,changes,issues,draft,hasSupplierImage:Boolean(candidate.evidence?.image),channel:row.channel,mode:row.mode,option:candidate.input.option,
       price:candidate.result.reference,shipping:candidate.input.shipping};
   };
 }

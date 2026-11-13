@@ -36,3 +36,13 @@ test("검색 어댑터가 동일품과 유사품 검색을 별도로 요청",asy
  queries.push(url.searchParams.get("kind"));return {ok:true,json:async()=>({channel:"네이버",items:[exact]})};
  });assert.deepEqual(queries,["exact","similar"]);assert.equal(result.length,2);
 });
+
+test("G마켓 문구 일반 판매가와 선결제 배송비 수수료를 분리하고 미지원 분류는 보류한다",()=>{
+  const input={gmarketCategory:"문구/사무용품",maker:"회사",model:"모델",option:"1개",cost:5000,freight:2000,shipping:3000};
+  const samples=[{...input,match:true,title:"문구",seller:"판매자",price:10000,url:"https://example.com/gm"}];
+  assert.equal(evaluate(input,samples,"G마켓").policy.fee,1399);
+  const rounded=evaluate({...input,floor:10001},samples,"G마켓");
+  assert.equal(rounded.reference,10010);
+  assert.equal(rounded.profit,rounded.reference+3000-5000-2000-rounded.policy.fee);
+  assert.equal(evaluate({...input,gmarketCategory:""} ,samples,"G마켓").profit,null);
+});

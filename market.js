@@ -4,11 +4,17 @@ function amount(value){
 }
 const clean=value=>String(value??"").normalize("NFKC").toLowerCase().replace(/\s+/g,"").trim();
 const feeSources={
+  "G마켓":"https://item.esmplus.com/gmarket-service-fee.html",
   "네이버":"https://help.sell.smartstore.naver.com/faq/content.help?faqId=3558",
   "쿠팡":"https://cloud.mkt.coupang.com/Fee-Table?rf=MARKETPLACE"
 };
 function feeEstimate(channel,input,goods,shipping){
   const dated={source:feeSources[channel],checked:"2026-11-11"};
+  if(channel==="G마켓"){
+    const known=["문구/사무용품","생활용품"].includes(input.gmarketCategory);
+    return {source:feeSources[channel],checked:"2026-11-13",label:known?"일반 오픈마켓 13% · 선결제 배송비 3.3%":"G마켓 상품 분류 확인 필요",
+      fee:known?Math.ceil((goods*130+shipping*33)/1000):null};
+  }
   if(channel==="네이버"){
     const grades={"일반":3630,"영세":1947,"중소1":2563,"중소2":2728,"중소3":3003};
     const rate=grades[input.grade];
@@ -87,11 +93,12 @@ function evaluate(input,samples,channel){
   const median=prices.length?Math.round((prices[mid]+prices[Math.floor((prices.length-1)/2)])/2):null;
   const shipping=amount(input.shipping),cost=amount(input.cost),freight=amount(input.freight);
   const floor=amount(input.floor||0);
-  const reference=median===null?null:Math.max(1,floor,median-shipping);
+  const unit=channel==="G마켓"?10:1;
+  const reference=median===null?null:Math.ceil(Math.max(1,floor,median-shipping)/unit)*unit;
   const policy=feeEstimate(channel,input,reference??0,shipping);
   const appliedFreight=input.freeAbove && cost>=amount(input.freeAbove)?0:freight;
   const profit=reference===null||policy.fee===null?null:reference+shipping-cost-appliedFreight-policy.fee;
-  const result={version:2,appliedFreight,basis,prices,exact:groups["동일"].length,similar:groups["유사"].length,selected:groups[basis].map(s=>s.url),median,reference,policy,profit,margin:profit===null?null:profit*100/(reference+shipping)};
+  const result={version:channel==="G마켓"?3:2,appliedFreight,basis,prices,exact:groups["동일"].length,similar:groups["유사"].length,selected:groups[basis].map(s=>s.url),median,reference,policy,profit,margin:profit===null?null:profit*100/(reference+shipping)};
   result.assessment=assessCandidate(input,result,groups[basis]);
   return result;
 }

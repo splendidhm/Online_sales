@@ -8,7 +8,7 @@ async function contentAI(task, facts, draft, request=fetch){
   const instruction=review?
     '한국어 상세페이지 검수자다. 상품 근거와 본문 및 사진을 독립 대조해 맞춤법, 수량, 위험 표현, 사진 속 문구와 필수 고시 오류를 찾는다. JSON {"issues":[{"field":"body","message":"위치, 사유, 수정 제안"}]}로 답한다. 오류가 없으면 빈 배열이다.':
     '한국어 상품 설명 작성자다. 입력 근거만 사용하여 상품명과 구성을 보존한 구매자용 제목과 설명을 작성한다. 추정한 효과, 인증, 원산지, 후기, 할인은 작성하지 않는다. JSON {"title":"...","body":"..."}로 답한다.';
-  const {image,...copy}=draft;
+  const {image,marketProfile,...copy}=draft;
   const content=[{type:"text",text:JSON.stringify({facts,copy})}];
   if(review && image)content.push({type:"image_url",image_url:{url:image}});
   const headers={"Content-Type":"application/json"};

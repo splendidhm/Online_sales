@@ -17,3 +17,9 @@
 ## 허가된 검색 공급처 연결
 
 서버 환경변수 `ACC_RESEARCH_URL`에 계약한 공급처 어댑터의 HTTPS 주소를 설정한다. 필요한 경우 `ACC_RESEARCH_TOKEN`을 사용한다. 서버는 GET 요청에 channel(네이버·쿠팡), q, kind(exact·similar), sort(relevance·reviews_desc)를 보낸다. 응답은 동일 channel과 items 배열이다. 표본마다 title, maker, model, option, seller, url, reviews, price, shipping, time(한국시간 YYYY-MM-DDTHH:mm), match(일반 배송·구성 비교 가능 여부)를 전달한다. 공급처가 없으면 두 검색 링크와 직접 입력을 사용한다. 자동 수수료는 위 출처에서 확인해 코드에 반영한 버전이며 공급처의 상품 검색 응답에서 요율을 가져오지 않는다.
+
+## G마켓 일반 오픈마켓
+
+G마켓 계산 버전 3은 시장 기준가와 공급처 하한가를 반영한 뒤 10원 단위로 올림하고 수수료와 이익을 계산한다. 예를 들어 하한가 10,001원이 적용되면 승인 검토가는 10,010원이다. 기존 저장본은 저장 당시 값을 유지한다. [ESM 가격 단위](https://etapi.gmarket.com/21)
+
+정책 확인일은 2026-11-13이다. 문구/사무용품·생활용품은 판매가의 13%와 구매자 선결제 배송비의 3.3%를 합산하고 예상 비용을 원 단위 올림한다. 다른 분류는 산출 대기다. 계정별 월 서버 이용료는 주문당 지표에서 제외한다. [ESM 공식 표](https://item.esmplus.com/gmarket-service-fee.html)

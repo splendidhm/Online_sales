@@ -10,6 +10,7 @@ function field(container, key, title, type) {
   label.append(input); el(container).append(label); return input;
 }
 const fields = {};
+labels.gmarketCategory="G마켓 상품 분류";choices.gmarketCategory=["문구/사무용품","생활용품"];
 for(const [key,label,hint] of [["demand","수요","확인한 주문 추세 등"],["supplier","공급사 신뢰도","출고·반품 대응 이력 등"],["difference","차별성","비교 상품과 다른 구성 등"]]){
   choices[key+"Level"]=["낮음","보통","높음"];
   fields[key+"Level"]=field("evidence",key+"Level",label+" 평가","text");
@@ -45,13 +46,15 @@ function load(){
 }
 function render(){
   const channel=el("channel").value;
+  fields.gmarketCategory.parentElement.hidden=channel!=="G마켓";
   fields.grade.parentElement.hidden=channel!=="네이버";fields.category.parentElement.hidden=channel!=="쿠팡";
   const data=values();
-  const search=channel==="네이버"?"https://search.shopping.naver.com/search/all?query=":"https://www.coupang.com/np/search?q=";
+  const search={"네이버":"https://search.shopping.naver.com/search/all?query=","쿠팡":"https://www.coupang.com/np/search?q=","G마켓":"https://www.gmarket.co.kr/n/search?keyword="}[channel];
   for(const [id,query] of [["exactSearch",[data.maker,data.model,data.option].filter(Boolean).join(" ")],["similarSearch",data.keywords]]){
     el(id).href=search+encodeURIComponent(query);el(id).hidden=!query;
   }
   el("feeSource").href=feeSources[channel];
+  el("feeDate").textContent=feeEstimate(channel,data,0,0).checked;
   el("list").replaceChildren();
   el("assessment").replaceChildren();
   samples.forEach((s,index)=>{

@@ -1,6 +1,6 @@
 async function research({input,channel}, endpoint=process.env.ACC_RESEARCH_URL, request=fetch){
   if(!endpoint)throw Error("허가받은 상품 검색 공급처가 연결되지 않았습니다. 검색 링크로 조회한 표본을 입력할 수 있습니다.");
-  if(!["네이버","쿠팡"].includes(channel))throw Error("마켓을 확인하세요.");
+  if(!["네이버","쿠팡","G마켓"].includes(channel))throw Error("마켓을 확인하세요.");
   const queries=[
     ["exact",[input.maker,input.model,input.option].every(Boolean)?[input.maker,input.model,input.option].join(" "):""],
     ["similar",input.keywords]

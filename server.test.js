@@ -41,7 +41,7 @@ test("후보 저장, 마켓 분리, 결정 검증, 동시 수정과 재시작 �
   const studio=(action,base,draft)=>request("studio",{version:second,action,base,draft});
   const initial=await (await studio("open")).json();
   assert.equal(initial.price,14900);
-  const draft={...initial.draft,origin:"시험 원산지",disclosure:"시험 고시",returns:"시험 반품 안내",rights:"공급사 사진 사용 동의 문서 1호",imageReviewed:true,
+  const draft={...initial.draft,stock:"5",origin:"시험 원산지",disclosure:"시험 고시",returns:"시험 반품 안내",rights:"공급사 사진 사용 동의 문서 1호",imageReviewed:true,
     image:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII="};
   const flagged=await (await studio("save",0,{...draft,imageText:"항균"})).json();
   assert.ok(flagged.issues.some(issue=>issue.field==="imageText"));
@@ -52,6 +52,36 @@ test("후보 저장, 마켓 분리, 결정 검증, 동시 수정과 재시작 �
   assert.equal((await studio("export",revised.id)).status,400);
   assert.equal((await (await studio("approve",revised.id)).json()).approved,true);
   assert.deepEqual((await (await studio("export",revised.id)).json()).draft,draft);
+  const operation=(action,fields)=>request("operations",{mode:"manual",action,...fields});
+  const record=async(action,fields)=>{
+    const response=await operation(action,fields),data=await response.json();
+    assert.equal(response.status,200,data.error);return data;
+  };
+  const publish={version:second,revision:revised.id,external:"test-001"};
+  const listing=(await record("publish",publish)).id;
+  assert.equal((await record("publish",publish)).id,listing);
+  const observation={listing,sale:"selling",option:"1개",price:14900,extra:0,discount:0,stock:5,shipping:0};
+  assert.equal((await record("verify",{...observation,price:14500})).status,"mismatch");
+  assert.equal((await record("verify",{listing,sale:"rejected"})).status,"failed");
+  assert.equal((await record("verify",observation)).status,"verified");
+  assert.equal((await operation("verify",{...observation,mode:"fixture"})).status,400);
+  const orderData={listing,ref:"sample-1",qty:1,cost:10167,freight:3000,paid:14900};
+  const order=(await record("order",orderData)).id;
+  assert.equal((await record("order",orderData)).id,order);
+  assert.equal((await operation("advance",{listing,order,stage:"delivered"})).status,400);
+  for(const stage of ["purchased","shipped","delivered"])await record("advance",{listing,order,stage});
+  await record("settle",{listing,order,received:13912,loss:0});
+  await record("supply",{listing,cost:11000,stock:0});
+  const report=await record("report",{});
+  assert.equal(report.weekly.profit,745);assert.equal(report.supply[0].stock,0);
+  const refund={listing,order,ref:"ret-1",qty:1,recovery:10167,expense:1500};
+  assert.equal((await record("return",refund)).id,(await record("return",refund)).id);
+  assert.equal((await operation("return",{...refund,ref:"ret-over"})).status,400);
+  assert.equal((await record("report",{})).weekly.count,0);
+  await record("settle",{listing,order,received:0,loss:0});
+  assert.equal((await record("report",{})).weekly.profit,-4500);
+  await record("settle",{listing,order,received:-300,loss:0});
+  assert.equal((await record("report",{})).weekly.profit,-4800);
   assert.equal((await request("decision",{id:second,choice:"제외"})).status,409);
   await save({...sheet,base:0,channel:"쿠팡"});
   await stop();await start();
@@ -63,6 +93,21 @@ test("후보 저장, 마켓 분리, 결정 검증, 동시 수정과 재시작 �
   assert.equal(rows.find(r=>r.channel==="쿠팡").choice,null);
   assert.deepEqual(await (await request("candidates?mode=fixture")).json(),[]);
   const selected=batch.rows.find(row=>row.status==="조사 대상");
+  assert.equal((await record("report",{})).weekly.profit,-4800);
+  const demo=await save({...sheet,mode:"fixture",base:0});
+  await request("decision",{id:demo,choice:"진행"});
+  const fixtureRevision=await (await request("studio",{version:demo,action:"save",base:0,draft})).json();
+  assert.equal((await request("studio",{version:demo,action:"approve",base:fixtureRevision.id})).status,200);
+  const mockListing=await record("publish",{mode:"fixture",version:demo,revision:fixtureRevision.id});
+  assert.equal((await record("report",{mode:"fixture"})).items[0].status,"verified");
+  await record("simulate",{...observation,mode:"fixture",listing:mockListing.id,shipping:3000});
+  assert.equal((await record("verify",{mode:"fixture",listing:mockListing.id})).status,"mismatch");
+  const revoke=await request("studio",{version:demo,action:"revise",base:fixtureRevision.id});
+  assert.equal((await revoke.json()).withdrawn,true);
+  assert.equal((await operation("publish",{mode:"fixture",version:demo,revision:fixtureRevision.id})).status,400);
+  const feed=await (await request("batches",{mode:"manual",items:[{...input,code:"SUP-1",minimum:1,stock:2,direct:true,resale:true,rights:true}]})).json();
+  assert.equal(feed.counts["조사 대상"],1);
+  assert.equal((await request("batches?id="+feed.id)).status,404);
   const imported={...sheet,base:0,mode:"fixture",batchId:batch.id,input:{...input,...selected}};
   await save(imported);
   assert.equal((await (await request("candidates?mode=fixture")).json())[0].batchId,batch.id);
@@ -71,6 +116,7 @@ test("후보 저장, 마켓 분리, 결정 검증, 동시 수정과 재시작 �
   assert.equal((await request("candidates",updated)).status,409);
   const third=await save({...updated,base:second});
   assert.equal((await studio("export",revised.id)).status,400);
+  assert.equal((await operation("publish",publish)).status,400);
   const next=await (await request("candidates?mode=manual")).json();
   assert.equal(next.find(r=>r.id===third).choice,null);
 });

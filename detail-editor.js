@@ -46,6 +46,8 @@ function detailEditor(api){
   const panel=el("studio");
   const labels={title:"상품명",body:"상세 설명",source:"공급 정보 출처",origin:"원산지",disclosure:"품목별 상품정보고시",returns:"배송·반품 안내",rights:"이미지 사용 근거 (채널·허가 문서)",imageText:"사진 속 문구 (없으면 빈칸)"};
   const fields={};
+  labels.stock="마켓 판매가능수량 (등록 전 필수)";
+  labels.marketProfile="마켓 API 카테고리·배송·상품고시 설정 (자동 등록용 JSON)";
   let current=null, draft=null, generation=0;
   for(const [key,title] of Object.entries(labels)){
     const label=document.createElement("label"),field=document.createElement("textarea");
@@ -55,8 +57,15 @@ function detailEditor(api){
   function render(){
     el("studioPreview").innerHTML=detailMarkup(current,draft);
     const dirty=JSON.stringify(current.draft)!==JSON.stringify(draft);
-    el("studioApprove").disabled=dirty||!current.id||current.approved||current.issues.length>0;
+    el("studioApprove").disabled=dirty||!current.id||current.approved||current.withdrawn||current.issues.length>0;
+    el("studioRevise").disabled=el("studioReject").disabled=dirty||!current.id||current.withdrawn;
     el("studioExport").disabled=dirty||!current.approved;
+    el("publish").disabled=dirty||!current.approved||!draft.stock;
+    el("publish").textContent=current.mode==="fixture"?"연습 등록·재조회":"판매자센터 수동 등록 기록";
+    el("externalLabel").hidden=current.mode==="fixture";
+    el("livePublish").hidden=current.mode!=="manual";
+    el("livePublish").textContent=current.channel+" 승인본 실등록";
+    el("livePublish").disabled=dirty||!current.approved||!draft.stock||!draft.marketProfile;
     el("studioIssues").replaceChildren();
     if(!dirty)for(const issue of current.issues){
       const li=document.createElement("li");li.textContent=(labels[issue.field]??"사진")+" · "+issue.message;el("studioIssues").append(li);
@@ -65,10 +74,19 @@ function detailEditor(api){
   }
   function display(state){
     current=state;draft=structuredClone(state.draft);
-    for(const [key,field] of Object.entries(fields))field.value=draft[key];
+    for(const [key,field] of Object.entries(fields))field.value=draft[key]??"";
+    el("externalId").value="";
     el("studioChecked").checked=draft.imageReviewed;el("studioFile").value="";
     el("studioMeta").textContent=[state.mode==="fixture"?"연습":"실상품",state.channel,"계산서 "+state.version,"게시본 "+(state.id||"초안")].join(" · ");
     el("studioWrite").hidden=!state.ai;panel.hidden=false;render();
+    el("sourcePhoto").hidden=!state.hasSupplierImage;
+    el("studioDiff").replaceChildren();
+    for(const item of state.changes??[]){
+      const p=document.createElement("p");
+      p.textContent=(labels[item.key]??"사진 확인")+" · "+item.before+" → "+item.after;el("studioDiff").append(p);
+    }
+    if(!state.changes?.length)el("studioDiff").textContent="이전 저장본과 비교할 변경 항목이 없습니다.";
+    if(state.withdrawn)el("studioStatus").textContent=state.decision==="reject"?"게시 제외":"수정 요청 · 새 게시본을 저장하세요.";
   }
   el("studioChecked").onchange=e=>{draft.imageReviewed=e.target.checked;render();};
   el("studioFile").onchange=e=>{
@@ -98,6 +116,33 @@ function detailEditor(api){
   }
   el("studioSave").onclick=()=>act("save");el("studioApprove").onclick=()=>act("approve");el("studioExport").onclick=()=>act("export");
   el("studioWrite").onclick=()=>act("write");
+  el("sourcePhoto").onclick=async()=>{
+    const target=draft;panel.inert=true;
+    try{
+      const result=await api("/api/studio",{action:"supplierImage",version:current.version,base:current.id});
+      if(target===draft){
+        draft.image=result.image;draft.imageReviewed=false;el("studioChecked").checked=false;render();
+      }
+    }catch(e){el("studioStatus").textContent=e.message;}finally{panel.inert=false;}
+  };
+  el("studioRevise").onclick=()=>act("revise");el("studioReject").onclick=()=>act("reject");
+  el("livePublish").onclick=async()=>{
+    panel.inert=true;
+    try{
+      const result=await api("/api/market-submit",{version:current.version,revision:current.id});
+      el("studioStatus").textContent=result.message;
+    }catch(error){el("studioStatus").textContent=error.message;}finally{
+      window.dispatchEvent(new Event("operations-changed"));panel.inert=false;
+    }
+  };
+  el("publish").onclick=async()=>{
+    panel.inert=true;
+    try{
+      const {id}=await api("/api/operations",{action:"publish",mode:current.mode,version:current.version,revision:current.id,external:el("externalId").value});
+      el("studioStatus").textContent="등록 기록 "+id+"번을 저장했습니다.";
+      window.dispatchEvent(new Event("operations-changed"));el("operations").scrollIntoView();
+    }catch(error){el("studioStatus").textContent=error.message;}finally{panel.inert=false;}
+  };
   for(const key of ["mode","channel"])el(key).addEventListener("change",()=>{generation++;panel.hidden=true;});
   return async version=>{
     const ticket=++generation;

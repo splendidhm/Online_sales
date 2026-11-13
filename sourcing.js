@@ -43,4 +43,18 @@ function screen(products) {
   });
   return {counts,rows};
 }
-module.exports={mockProducts,screen};
+function supplierProducts(items){
+  if(!Array.isArray(items)||!items.length||items.length>1000)throw Error("공급 상품 배열 1~1,000개를 선택하세요.");
+  return items.map(item=>{
+    const row={};
+    for(const key of ["code","name","option","source","maker","model","keywords"]){
+      row[key]=typeof item?.[key]==="string"?item[key].trim():"";
+    }
+    if(!row.code||!row.name||!/^https?:\/\//.test(row.source)||new URL(row.source).hostname==="fixture.invalid")throw Error("실제 공급 상품번호·상품명·출처가 필요합니다.");
+    row.source=new URL(row.source).href;
+    for(const key of ["cost","freight","stock","minimum"])row[key]=/^\d{1,9}$/.test(String(item[key]))?Number(item[key]):null;
+    for(const key of ["direct","rights","resale"])row[key]=typeof item[key]==="boolean"?item[key]:null;
+    return row;
+  });
+}
+module.exports={mockProducts,screen,supplierProducts};

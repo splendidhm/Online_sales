@@ -3,21 +3,29 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f6f5ef;color:#233831;font:16px/1.55 "Malgun Gothic",sans-serif}header{background:#153e35;color:white;padding:16px max(5vw,20px);display:flex;justify-content:space-between;align-items:center}main{max-width:1150px;margin:36px auto;padding:0 20px}h1{font-size:clamp(28px,4vw,46px);letter-spacing:-.06em;margin:0}h2{font-size:20px;margin:0 0 14px}section,aside{background:white;border:1px solid #d9dfd6;border-radius:12px;padding:24px;margin:16px 0}.layout{display:grid;grid-template-columns:2fr 1fr;gap:18px;align-items:start}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}label{display:block;font-size:14px}input,select,button{font:inherit;border:1px solid #acbab1;border-radius:6px;padding:8px;width:100%;background:white;color:inherit}button{background:#195444;color:white;cursor:pointer;width:auto}output{display:block;font-size:28px;font-weight:700;color:#145846}small{color:#52645c}aside{position:sticky;top:12px}li{margin:9px 0;overflow-wrap:anywhere}li button{padding:2px 8px;margin-left:8px}@media(max-width:720px){.layout{display:block}aside{position:static}}
 </style><header><b>ACC　위탁판매 관리</b><select id="mode" aria-label="자료 종류" style="width:auto;color:#234"><option value="fixture">연습 계산서</option><option value="manual">실상품 계산서</option></select></header>
-<main><h1>상품 한 개 계산서</h1><p>마켓별로 상품 한 개의 판매 조건과 경쟁가를 기록합니다.</p>
+<style>
+.worknav{background:#fff;border-bottom:1px solid #d9dfd6;display:flex;gap:20px;padding:10px max(5vw,20px);flex-wrap:wrap}.worknav a{color:#195444;text-decoration:none;font-weight:650}.worknav a:hover{text-decoration:underline}
+#operations details{margin:.7em 0}#operations summary{cursor:pointer;color:#195444;font-weight:600}#operations form{margin:12px 0}#operations button{margin:3px}#opsFilter{width:auto}#resultsTools{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+</style><nav class="worknav" aria-label="업무 바로가기"><a href="#sourcing">공급 상품 선별</a><a href="#worksheet">시장조사·손익</a><a href="#candidates">후보 승인</a><a href="#operations">판매 운영·보고</a></nav>
+<main><h1 id="worksheet">상품 한 개 계산서</h1><p>마켓별로 상품 한 개의 판매 조건과 경쟁가를 기록합니다.</p>
+<details><summary>서버 연동 설정 상태</summary><p id="connections"></p><small>실상품 가격·재고는 서버 실행 중 1시간마다 연결된 공급처와 마켓에서 조회합니다.</small></details>
 <section id="sourcing" hidden>
-<h2>도매 상품 모의 수집</h2>
+<h2>도매 상품 선별</h2>
+<button id="demoProduct" type="button">펜꽂이 연습 상품 열기</button>
+<form id="supplierSearch" hidden><label>도매매 상품명 검색 <input id="supplierQuery" placeholder="예: 책상 정리함" required maxlength="100"></label><label>조회 수량 <input id="supplierCount" type="number" min="1" max="1000" value="20" required></label><button>도매매에서 가져오기</button></form>
 <form id="batchForm" class="grid">
 <label>수집 수량 <input id="batchLimit" type="number" min="1" max="1000" value="100" required></label>
 <button id="collect">모의 회차 생성</button>
+<label id="supplierLabel" hidden>허가된 공급 상품 목록 (JSON)<input type="file" id="supplierFile" accept=".json"></label>
 <label>저장된 회차 <select id="batchHistory"></select></label>
 </form>
 <p id="batchSummary" role="status"></p>
 <label>선별 결과 <select id="batchFilter" style="width:auto"><option>조사 대상</option><option>순번 대기</option><option>중복</option><option>제외</option><option>보완</option></select></label>
 <ul id="batchRows"></ul><button hidden id="showMore">20개 더 보기</button>
 </section>
-<label>판매 마켓 <select id="channel" style="width:auto"><option>네이버</option><option>쿠팡</option></select></label>
+<label>판매 마켓 <select id="channel" style="width:auto"><option>네이버</option><option>쿠팡</option><option>G마켓</option></select></label>
 <div class="layout"><div><section><h2>상품과 판매 조건</h2><div class="grid" id="product"></div></section>
-<section><h2>주문 한 건의 비용</h2><div class="grid" id="costs"></div><small>부가세 포함 · 광고·반품 비용 차감 전 예상 · 수수료 기준 확인일 2026-11-11 · <a id="feeSource" target="_blank" rel="noopener">마켓 공식 기준</a></small></section>
+<section><h2>주문 한 건의 비용</h2><div class="grid" id="costs"></div><small>부가세 포함 · 광고·반품 비용 차감 전 예상 · 수수료 기준 확인일 <span id="feeDate"></span> · <a id="feeSource" target="_blank" rel="noopener">마켓 공식 기준</a></small></section>
 <section><h2>시장조사 표본</h2><button id="autoResearch" hidden>연결된 공급처에서 시장조사</button><p id="researchStatus" role="status"></p><p><a id="exactSearch" target="_blank" rel="noopener">① 동일 제조사·모델·구성 검색</a>　<a id="similarSearch" target="_blank" rel="noopener">② 유사 상품 검색</a></p><small>유사 표본은 검색어를 모두 포함하고 구성이 비교 가능한 상품 중 리뷰 수 순으로 선정합니다.</small><form id="form"><div class="grid" id="sample"></div><label><input style="width:auto" type="checkbox" name="match" checked> 구성과 일반 배송 조건 비교 가능</label><button>표본 추가</button></form><ul id="list"></ul></section></div>
 <aside aria-live="polite"><h2>예상 손익</h2><small>시장 제안가 기준 예상 이익 · 세액 정산 전</small><output id="profit"></output><p id="summary"></p><hr><p id="market"></p><small id="saved"></small></aside></div>
 <section><h2>상품성 평가</h2><p>확인한 자료가 있는 항목에 등급과 근거를 함께 기록하세요.</p><div id="evidence" class="grid"></div><p id="assessment" aria-live="polite"></p></section></main>
@@ -31,8 +39,19 @@
 <h2>상세페이지 편집·검수</h2><p id="studioMeta"></p>
 <div class="grid" id="studioFields"></div><button hidden id="studioWrite">AI 문안 제안</button>
 <label>허가된 상품 사진 (PNG·JPEG, 최대 2MB)<input id="studioFile" type="file" accept="image/png,image/jpeg"></label>
+<button id="sourcePhoto" hidden>공급처 원본 사진 불러오기</button>
 <label><input id="studioChecked" type="checkbox" style="width:auto"> 사진 속 문구를 기록하고 실제 상품·사용 조건을 확인했습니다.</label>
 <h3>구매자 미리보기</h3><article id="studioPreview" style="white-space:pre-wrap"></article>
 <ul id="studioIssues"></ul><button id="studioSave">수정본 저장·검수</button> <button id="studioApprove">이 게시본 승인</button> <button id="studioExport">승인본 HTML 내려받기</button>
+<label id="externalLabel" hidden>판매자센터 등록번호 <input id="externalId"></label><button id="publish">등록</button>
+<details><summary>이전 게시본과 비교</summary><div id="studioDiff"></div></details>
+<button id="studioRevise">수정 요청</button> <button id="studioReject">게시 제외</button>
+<button id="livePublish" hidden>승인본 스마트스토어 실등록</button>
 <p role="status" id="studioStatus"></p></section>
-<script src="market.js"></script><script src="worksheet.js"></script><script src="detail-editor.js"></script><script src="candidates.js"></script></html>
+<section id="operations" style="max-width:1110px;margin:20px auto">
+<h2>판매 운영</h2><div id="marketImport" hidden><h3>마켓 원장 대조</h3>
+<form id="importForm" class="grid"><label>마켓<select name="channel"><option>네이버</option><option>쿠팡</option></select></label>
+<label>한국시간 조회일<input type="date" name="day" required></label><label>자료<select name="kind"><option value="orders">주문</option><option value="settlements">정산</option></select></label>
+<button value="sync">마켓에서 가져오기</button><button value="read">저장본 열기</button></form><div id="importRows" aria-live="polite"></div></div>
+<p role="status" id="opsNotice"></p><div id="resultsTools"><label>등록 결과 <select id="opsFilter"><option value="">전체</option><option value="mismatch">가격 불일치</option><option value="failed">실패</option><option value="paused">보류</option><option value="pending">대기</option><option value="verified">성공</option></select></label><button id="downloadResults" disabled>전체 결과 CSV 내려받기</button></div><div id="opsBody"></div></section>
+<script src="market.js"></script><script src="worksheet.js"></script><script src="detail-editor.js"></script><script src="operations-ui.js"></script><script src="candidates.js"></script></html>
