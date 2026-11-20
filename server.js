@@ -186,6 +186,12 @@ function createApp(filename, token, {orchestrationEnabled = process.env.ACC_ORCH
         if(row.stock<Number(page.draft.stock)||row.cost!==Number(candidate.input.cost)||row.freight!==candidate.result.appliedFreight||row.rights!==true||row.minimum!==1||row.floor>page.price)fail("공급 가격·재고·배송·권리 조건 변경 또는 미확인 · 재검토가 필요합니다.");
       }
       const image=await provider.upload(page);
+      page.detailImages={};
+      for(const [slot,photo] of Object.entries(page.draft.photos??{})){
+        const profile=JSON.parse(page.draft.marketProfile);
+        profile.imageUrl=profile.detailImageUrls?.[slot];
+        page.detailImages[slot]=await provider.upload({...page,draft:{...page.draft,image:photo.image,marketProfile:JSON.stringify(profile)}});
+      }
       readPage();
       const id=ops({mode:"manual",action:"publish",version:page.version,revision:page.id,external:"PENDING-"+page.id}).id;
       // 이미지 업로드 중 겹친 요청은 같은 예약을 공유한다. 발송 표식은 네트워크 호출 전에 확정한다.
@@ -287,15 +293,19 @@ function createApp(filename, token, {orchestrationEnabled = process.env.ACC_ORCH
         res.setHeader("Content-Disposition",`attachment; filename="conu-analysis-${id}.xlsx"`);
         return res.end(bytes);
       }
-      if(req.method!=="POST" || !(isRunList || runMatch?.[2]==="supplement" || ["/api/demo","/api/market-import","/api/market-submit","/api/market-read","/api/operations","/api/studio","/api/research","/api/batches","/api/candidates","/api/decision"].includes(url.pathname))) fail("지원하지 않는 요청입니다.",404);
+      if(req.method!=="POST" || !(isRunList || runMatch?.[2]==="supplement" || ["/api/demo","/api/market-import","/api/market-submit","/api/market-read","/api/operations","/api/studio","/api/research","/api/supplier-products/preview","/api/batches","/api/candidates","/api/decision"].includes(url.pathname))) fail("지원하지 않는 요청입니다.",404);
       if(req.headers.origin && req.headers.origin!=="http://"+host) fail("접근 권한이 없습니다.",403);
       let body="",size=0;
       req.setEncoding("utf8");
-      const limit=url.pathname==="/api/studio"?3200000:512000;
+      const limit=url.pathname==="/api/studio"?9000000:512000;
       for await(const chunk of req){size+=Buffer.byteLength(chunk);if(size>limit) fail("입력 크기를 줄이세요.");body+=chunk;}
       const data=JSON.parse(body);
       if(isRunList) return res.end(JSON.stringify(agentRuns.start(data)));
       if(runMatch?.[2]==="supplement") return res.end(JSON.stringify(agentRuns.supplement(Number(runMatch[1]),data)));
+      if(url.pathname==="/api/supplier-products/preview"){
+        if(data.mode!=="manual")fail("실상품 자료에서 공급처 URL을 조회하세요.");
+        return res.end(JSON.stringify(await require("./supplier-provider").previewSupplierUrl(data.url)));
+      }
       if(url.pathname==="/api/operations"&&data.action==="readSupply"){
         const entry=db.prepare("SELECT v.body FROM listings l JOIN versions v ON v.id=l.version WHERE l.id=? AND v.mode='manual'").get(data.listing);
         if(!entry||data.mode!=="manual")fail("실상품 등록 건을 확인하세요.");
@@ -314,6 +324,21 @@ function createApp(filename, token, {orchestrationEnabled = process.env.ACC_ORCH
         if(data.mode!=="manual")fail("실상품 자료에서 공급처를 조회하세요.");
         const snapshot=await require("./supplier-provider").fetchCatalog(data);
         const stored=db.prepare("INSERT INTO sourcing_batches(mode,total,snapshot) VALUES('manual',?,?)").run(snapshot.rows.length,JSON.stringify(snapshot));
+        return res.end(JSON.stringify({id:Number(stored.lastInsertRowid),counts:snapshot.counts}));
+      }
+      if(url.pathname==="/api/batches"&&data.provider==="supplier-url"){
+        if(data.mode!=="manual")fail("실상품 자료에서 공급처 URL을 사용하세요.");
+        const supplier=require("./supplier-provider");
+        const parsed=supplier.supplierUrl(data.url);
+        let providerItem={};
+        try{
+          const preview=await supplier.previewSupplierUrl(data.url);
+          if(preview.item?.name)providerItem=preview.item;
+        }catch{/* 대표자가 확인한 수동 입력은 공급처 일시 오류와 분리해 저장한다. */}
+        const confirmed=require("./sourcing").supplierProducts([{...data.item,code:parsed.code,source:parsed.source}])[0];
+        const products=[{...providerItem,...confirmed,code:parsed.code,source:parsed.source}];
+        const snapshot=screen(products);
+        const stored=db.prepare("INSERT INTO sourcing_batches(mode,total,snapshot) VALUES('manual',?,?)").run(products.length,JSON.stringify(snapshot));
         return res.end(JSON.stringify({id:Number(stored.lastInsertRowid),counts:snapshot.counts}));
       }
       if(url.pathname==="/api/market-submit"||url.pathname==="/api/market-read")return res.end(JSON.stringify(await marketAction(data,url.pathname==="/api/market-submit")));

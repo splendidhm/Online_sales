@@ -45,8 +45,18 @@ test("후보 저장, 마켓 분리, 결정 검증, 동시 수정과 재시작 �
     image:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII="};
   const flagged=await (await studio("save",0,{...draft,imageText:"항균"})).json();
   assert.ok(flagged.issues.some(issue=>issue.field==="imageText"));
+  const photos={feature:{image:draft.image,text:"항균",rights:"",reviewed:false},composition:{image:draft.image,text:"",rights:"공급처 허가",reviewed:true}};
+  const multi=await (await studio("save",flagged.id,{...draft,photos})).json();
+  assert.ok(multi.issues.some(issue=>issue.field==="feature"));
+  assert.equal((await studio("approve",multi.id)).status,400);
+  photos.feature={...photos.feature,text:"",rights:"공급처 허가",reviewed:true};
+  const checked=await (await studio("save",multi.id,{...draft,photos})).json();
+  assert.deepEqual(checked.issues,[]);
+  const html=require("./detail-editor").detailDocument(checked);
+  assert.equal((html.match(/<img /g)||[]).length,3);
+  assert.ok(!html.includes("공급처 허가"));
   assert.equal((await studio("approve",flagged.id)).status,400);
-  const revised=await (await studio("save",flagged.id,draft)).json();
+  const revised=await (await studio("save",checked.id,draft)).json();
   assert.deepEqual(revised.issues,[]);
   assert.equal((await studio("approve",flagged.id)).status,400);
   assert.equal((await studio("export",revised.id)).status,400);
@@ -108,6 +118,13 @@ test("후보 저장, 마켓 분리, 결정 검증, 동시 수정과 재시작 �
   const feed=await (await request("batches",{mode:"manual",items:[{...input,code:"SUP-1",minimum:1,stock:2,direct:true,resale:true,rights:true}]})).json();
   assert.equal(feed.counts["조사 대상"],1);
   assert.equal((await request("batches?id="+feed.id)).status,404);
+  const urlFeed=await (await request("batches",{mode:"manual",provider:"supplier-url",url:"https://www.domeggook.com/43850688?market=dome&advcnt=test",
+    item:{...input,minimum:1,stock:2,direct:true,resale:true,rights:true}})).json();
+  assert.equal(urlFeed.counts["조사 대상"],1);
+  const urlSnapshot=await (await request("batches?mode=manual&id="+urlFeed.id)).json();
+  assert.equal(urlSnapshot.rows[0].code,"43850688");
+  assert.equal(urlSnapshot.rows[0].source,"https://www.domeggook.com/43850688");
+  assert.equal((await request("batches",{mode:"manual",provider:"supplier-url",url:"https://example.com/43850688",item:input})).status,400);
   const imported={...sheet,base:0,mode:"fixture",batchId:batch.id,input:{...input,...selected}};
   await save(imported);
   assert.equal((await (await request("candidates?mode=fixture")).json())[0].batchId,batch.id);

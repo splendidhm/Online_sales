@@ -1,7 +1,7 @@
 "use strict";
 if(location.protocol==="http:"){
   el("candidates").hidden=false;
-  if(location.hash.length>1&&!["#sourcing","#worksheet","#candidates","#operations","#orchestration"].includes(location.hash)){
+  if(location.hash.length>1&&!["#sourcing","#worksheet","#candidates","#operations","#orchestration","#detailQueue"].includes(location.hash)){
     sessionStorage.setItem("acc.admin",location.hash.slice(1));
     history.replaceState(null,"",location.pathname);
   }
@@ -30,6 +30,10 @@ if(location.protocol==="http:"){
     }catch(e){el("researchStatus").textContent=e.message;}finally{button.disabled=false;}
   };
   const openStudio=detailEditor(api);
+  const detailLink=document.createElement("a");
+  detailLink.href="#detailQueue";detailLink.textContent="상세페이지 제작";
+  document.querySelector(".worknav").insertBefore(detailLink,document.querySelector('.worknav a[href="#operations"]'));
+  el("detailQueue").hidden=false;
   el("demoProduct").onclick=async()=>{
     const b=el("demoProduct");b.disabled=true;
     try{
@@ -119,11 +123,56 @@ if(location.protocol==="http:"){
       }
     }catch(e){batchMessage(e.message);}finally{form.inert=false;}
   };
+  let supplierUrlPreview=null;
+  const optionalNumber=id=>el(id).value===""?null:Number(el(id).value);
+  const optionalBoolean=id=>el(id).value===""?null:el(id).value==="true";
+  function setSupplierUrlValue(id,value){el(id).value=value==null?"":String(value);}
+  el("supplierUrlForm").onsubmit=async event=>{
+    event.preventDefault();const form=event.currentTarget;form.inert=true;
+    try{
+      const url=el("supplierUrl").value;
+      supplierUrlPreview=await api("/api/supplier-products/preview",{mode:"manual",url});
+      const item=supplierUrlPreview.item??{};
+      setSupplierUrlValue("supplierUrlName",item.name);
+      setSupplierUrlValue("supplierUrlOption",item.option);
+      setSupplierUrlValue("supplierUrlCost",item.cost);
+      setSupplierUrlValue("supplierUrlFreight",item.freight);
+      setSupplierUrlValue("supplierUrlStock",item.stock);
+      setSupplierUrlValue("supplierUrlMinimum",item.minimum);
+      setSupplierUrlValue("supplierUrlDirect",item.direct);
+      setSupplierUrlValue("supplierUrlResale",item.resale);
+      setSupplierUrlValue("supplierUrlRights",item.rights);
+      el("supplierUrlOptions").replaceChildren(...supplierUrlPreview.options.map(value=>new Option(value)));
+      el("supplierUrlStatus").textContent="상품번호 "+supplierUrlPreview.code+" · "+supplierUrlPreview.message;
+      el("supplierUrlConfirm").hidden=false;
+      el("supplierUrlConfirm").scrollIntoView({behavior:"smooth",block:"nearest"});
+    }catch(e){batchMessage(e.message);el("supplierUrlConfirm").hidden=true;supplierUrlPreview=null;}finally{form.inert=false;}
+  };
+  el("supplierUrlConfirm").onsubmit=async event=>{
+    event.preventDefault();const form=event.currentTarget;if(!supplierUrlPreview)return;
+    form.inert=true;
+    try{
+      const item={name:el("supplierUrlName").value,option:el("supplierUrlOption").value,
+        cost:optionalNumber("supplierUrlCost"),freight:optionalNumber("supplierUrlFreight"),stock:optionalNumber("supplierUrlStock"),minimum:optionalNumber("supplierUrlMinimum"),
+        direct:optionalBoolean("supplierUrlDirect"),resale:optionalBoolean("supplierUrlResale"),rights:optionalBoolean("supplierUrlRights"),
+        maker:supplierUrlPreview.item?.maker??"",model:supplierUrlPreview.item?.model??"",keywords:supplierUrlPreview.item?.keywords??""};
+      const result=await api("/api/batches",{mode:"manual",provider:"supplier-url",url:el("supplierUrl").value,item});
+      if(el("mode").value==="manual"){
+        el("batchFilter").value=result.counts["조사 대상"]?"조사 대상":"보완";
+        await historyList(result.id);
+        batchMessage("URL 상품 1건을 저장했습니다. "+(result.counts["조사 대상"]?"AI 상품분석을 시작할 수 있습니다.":"보완 항목을 확인하세요."));
+      }
+      form.hidden=true;supplierUrlPreview=null;
+    }catch(e){batchMessage(e.message);}finally{form.inert=false;}
+  };
+  el("supplierUrlCancel").onclick=()=>{el("supplierUrlConfirm").hidden=true;supplierUrlPreview=null;};
   el("batchFilter").onchange=()=>{visibleCount=20;displayBatch();};
   el("showMore").onclick=()=>{visibleCount+=20;displayBatch();};
   function showSourcing(){
     const manual=el("mode").value==="manual";
     el("demoProduct").hidden=manual;
+    el("supplierUrlForm").hidden=!manual;
+    if(!manual){el("supplierUrlConfirm").hidden=true;supplierUrlPreview=null;}
     el("supplierSearch").hidden=!manual;
     el("sourcing").hidden=false;el("supplierLabel").hidden=!manual;el("batchLimit").parentElement.hidden=manual;
     el("collect").textContent=manual?"공급 자료 선별":"모의 회차 생성";
@@ -167,6 +216,15 @@ if(location.protocol==="http:"){
     const rows=await api("/api/candidates?mode="+el("mode").value);
     if(ticket!==generation)return;
     el("rows").replaceChildren();
+    const queue=el("detailQueueRows");queue.replaceChildren();
+    for(const row of rows.filter(row=>row.choice==="진행")){
+      const li=document.createElement("li");
+      li.textContent=[row.input.name,row.input.option,row.channel].join(" · ");
+      const button=document.createElement("button");button.textContent="초안 생성·이어쓰기";
+      button.onclick=()=>openStudio(row.id).catch(e=>alertMessage(e.message));
+      li.append(button);queue.append(li);
+    }
+    if(!queue.childElementCount)queue.textContent="후보 승인에서 ‘진행’을 선택한 상품이 여기에 표시됩니다.";
     for(const row of rows){
       const tr=el("rows").insertRow();
       const assessment=row.result.assessment;

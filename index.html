@@ -12,6 +12,25 @@
 <section id="sourcing" hidden>
 <h2>도매 상품 선별</h2>
 <button id="demoProduct" type="button">펜꽂이 연습 상품 열기</button>
+<form id="supplierUrlForm" hidden>
+<label>단일상품 URL <input id="supplierUrl" type="url" placeholder="https://www.domeggook.com/43850688" required maxlength="500"></label>
+<button id="supplierUrlPreview">URL 상품 확인</button>
+</form>
+<form id="supplierUrlConfirm" hidden>
+<p id="supplierUrlStatus" role="status"></p>
+<div class="grid">
+<label>상품명 <input id="supplierUrlName" required maxlength="200"></label>
+<label>조사할 옵션 한 개 <input id="supplierUrlOption" list="supplierUrlOptions" required maxlength="200"><datalist id="supplierUrlOptions"></datalist></label>
+<label>공급가(원) <input id="supplierUrlCost" type="number" min="0" max="999999999"></label>
+<label>공급 배송비(원) <input id="supplierUrlFreight" type="number" min="0" max="999999999"></label>
+<label>재고 <input id="supplierUrlStock" type="number" min="0" max="999999999"></label>
+<label>최소 주문수량 <input id="supplierUrlMinimum" type="number" min="1" max="999999999"></label>
+<label>구매자 주소 직배송 <select id="supplierUrlDirect"><option value="">미확인</option><option value="true">가능</option><option value="false">불가</option></select></label>
+<label>오픈마켓 재판매 <select id="supplierUrlResale"><option value="">미확인</option><option value="true">가능</option><option value="false">불가</option></select></label>
+<label>상품 이미지 사용 <select id="supplierUrlRights"><option value="">미확인</option><option value="true">가능</option><option value="false">불가</option></select></label>
+</div>
+<p><button id="supplierUrlCreate">이 상품 1건으로 조사 시작</button> <button id="supplierUrlCancel" type="button">취소</button></p>
+</form>
 <form id="supplierSearch" hidden><label>도매매 상품명 검색 <input id="supplierQuery" placeholder="예: 책상 정리함" required maxlength="100"></label><label>조회 수량 <input id="supplierCount" type="number" min="1" max="1000" value="20" required></label><button>도매매에서 가져오기</button></form>
 <form id="batchForm" class="grid">
 <label>수집 수량 <input id="batchLimit" type="number" min="1" max="1000" value="100" required></label>
@@ -50,11 +69,12 @@
 <p><button id="storeCandidate">현재 계산서 저장</button> <button id="freshCandidate">새 후보 입력</button></p>
 <p id="notice" role="status"></p><div style="overflow:auto"><table style="width:100%;text-align:left">
 <thead><tr><th>상품·옵션</th><th>마켓</th><th>판매가</th><th>예상 이익</th><th>유효 표본</th><th>가격 경쟁강도</th><th>근거 충족률</th><th>종합 점수</th><th>결정</th><th>검토</th></tr></thead><tbody id="rows"></tbody></table></div>
-</section><section id="studio" hidden style="max-width:950px;margin:auto">
+</section><section id="detailQueue" hidden style="max-width:1110px;margin:16px auto"><h2>승인 상품 상세페이지 제작</h2><ul id="detailQueueRows"></ul></section><section id="studio" hidden style="max-width:950px;margin:auto">
 <h2>상세페이지 편집·검수</h2><p id="studioMeta"></p>
 <div class="grid" id="studioFields"></div><button hidden id="studioWrite">AI 문안 제안</button>
 <label>허가된 상품 사진 (PNG·JPEG, 최대 2MB)<input id="studioFile" type="file" accept="image/png,image/jpeg"></label>
 <button id="sourcePhoto" hidden>공급처 원본 사진 불러오기</button>
+<div id="sectionPhotos" class="grid"></div>
 <label><input id="studioChecked" type="checkbox" style="width:auto"> 사진 속 문구를 기록하고 실제 상품·사용 조건을 확인했습니다.</label>
 <h3>구매자 미리보기</h3><article id="studioPreview" style="white-space:pre-wrap"></article>
 <ul id="studioIssues"></ul><button id="studioSave">수정본 저장·검수</button> <button id="studioApprove">이 게시본 승인</button> <button id="studioExport">승인본 HTML 내려받기</button>

@@ -4,6 +4,36 @@ const endpoint="https://product.domeggook.com/api/v1/product/_search";
 const number=value=>/^\d{1,9}$/.test(String(value))?Number(value):null;
 const plain=value=>typeof value==="string"?value.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,4000):"";
 
+function supplierUrl(value){
+  let url;
+  try{url=new URL(value);}catch{throw Error("도매꾹·도매매 상품 URL을 확인하세요.");}
+  const host=url.hostname.toLowerCase();
+  if(url.protocol!=="https:"||!(host==="domeggook.com"||host.endsWith(".domeggook.com")))throw Error("도매꾹·도매매 상품 URL만 사용할 수 있습니다.");
+  const pathCode=url.pathname.match(/(?:^|\/)([1-9]\d{5,11})(?:\/|$)/)?.[1];
+  const code=pathCode??url.searchParams.get("no");
+  if(!/^[1-9]\d{5,11}$/.test(code??""))throw Error("URL에서 공급 상품번호를 찾을 수 없습니다.");
+  const supply=host.startsWith("domeme.")||url.searchParams.get("market")==="supply";
+  return {code,source:(supply?"https://domeme.domeggook.com/":"https://www.domeggook.com/")+code};
+}
+
+function optionNames(value){
+  if(typeof value!=="string"||["","[]","{}"].includes(value.trim()))return [];
+  let root;
+  try{root=JSON.parse(value);}catch{return [];}
+  const names=[],seen=new Set();
+  function walk(node,inData=false){
+    if(!node||typeof node!=="object"||names.length>=500)return;
+    if(inData&&typeof node.name==="string"){
+      const name=plain(node.name).slice(0,200);
+      if(name&&!seen.has(name)){seen.add(name);names.push(name);}
+    }
+    if(Array.isArray(node)){for(const child of node)walk(child,inData);return;}
+    for(const [key,child] of Object.entries(node))walk(child,inData||key==="data");
+  }
+  walk(root);
+  return names;
+}
+
 function catalogRow(item,keyword){
   const code=String(item?.no??"");
   if(!/^[1-9]\d*$/.test(code)||!plain(item.title))throw Error("공급처에서 상품번호 또는 상품명을 확인할 수 없습니다.");
@@ -18,13 +48,25 @@ function catalogRow(item,keyword){
   const singlePrice=price.match(/^1\+(\d+)(?:\||$)/);
   const floor=number(item.price?.resale?.minimum);
   const detail=item.detail??{};
-  return {code,name:plain(item.title),source:"https://domeme.domeggook.com/"+code,option,keywords:keyword,
+  return {code,name:plain(item.title),source:"https://domeme.domeggook.com/"+code,option,options:optionNames(item.selectOpt),keywords:keyword,
     maker:plain(detail.manufacturer),model:plain(detail.model),floor,cost:optionless?number(singlePrice?.[1]??price):null,freight,
     minimum:unit,stock:number(item.qty?.inventory),direct:item.channel?.supply===true?true:null,
     resale:item.channel?.supply===true?true:null,rights,
     evidence:{supplierCode:code,rights:plain(license?.msg),origin:plain(detail.country),body:plain(item.desc?.contents?.item),returns:plain(item.desc?.contents?.deli),
       disclosure:Array.isArray(detail.infoDuty?.item)?detail.infoDuty.item.map(f=>[plain(f.name),plain(f.desc)].filter(Boolean).join(" · ")).join("\n").slice(0,4000):"",
       image:rights===true&&typeof item.thumb?.original==="string"?item.thumb.original:"",modified:plain(item.dateModify)}};
+}
+
+async function previewSupplierUrl(value,request=fetch,key=process.env.ACC_SUPPLIER_KEY){
+  const parsed=supplierUrl(value);
+  if(!key)return {...parsed,item:{code:parsed.code,source:parsed.source},options:[],connected:false,
+    message:"공급처 연동 키가 없어 상품번호만 확인했습니다. 공급 조건을 직접 확인해 입력하세요."};
+  const snapshot=await fetchCatalog({code:parsed.code,keyword:"상품 "+parsed.code,limit:1},request,key);
+  const row=snapshot.rows.find(item=>item.code===parsed.code);
+  if(!row)return {...parsed,item:{code:parsed.code,source:parsed.source},options:[],connected:true,
+    message:"도매매 공급 상품으로 조회되지 않았습니다. 도매꾹 상품 페이지에서 조건을 직접 확인해 입력하세요."};
+  return {...parsed,item:{...row,source:parsed.source},options:row.options??[],connected:true,
+    message:row.options?.length?"옵션을 하나 선택하고 옵션별 공급가·재고를 확인하세요.":"공급처 조회값을 원문과 대조한 뒤 회차를 생성하세요."};
 }
 
 async function fetchCatalog({keyword,limit,code},request=fetch,key=process.env.ACC_SUPPLIER_KEY){
@@ -69,4 +111,4 @@ async function supplierImage(evidence,request=fetch,origins=process.env.ACC_SUPP
   if(!type)throw Error("공급처 사진이 PNG 또는 JPEG 형식인지 확인하세요.");
   return "data:image/"+type+";base64,"+bytes.toString("base64");
 }
-module.exports={fetchCatalog,catalogRow,supplierImage};
+module.exports={fetchCatalog,catalogRow,supplierImage,supplierUrl,optionNames,previewSupplierUrl};

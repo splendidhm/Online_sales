@@ -30,9 +30,14 @@ function detailMarkup(state,draft=state.draft){
   const photo=/^data:image\/(?:png|jpeg);base64,[a-z0-9+/]+=*$/i.test(draft.image)
     ? `<img src="${draft.image}" alt="${safe(draft.title)}">`:"";
   const sample=state.mode==="fixture"?'<p class="sample">연습 상품</p>':"";
+  const sectionImage=(slot,alt)=>{
+    const image=state.detailImages?.[slot]??draft.photos?.[slot]?.image;
+    return image?'<img src="'+safe(image)+'" alt="'+safe(alt)+'">':"";
+  };
   return `<article class="product-sheet"><div class="cover">${sample}<h1>${safe(draft.title)}</h1><strong class="amount">${money(state.price)}</strong><span class="delivery">배송비 ${money(state.shipping)}</span></div>${photo}<div class="copy">`+
     block("상품 소개",`<p>${safe(draft.body)}</p>`)+
-    block("상품 정보","<dl>"+row("구성",state.option)+row("원산지",draft.origin)+row("상품정보고시",draft.disclosure)+"</dl>")+
+    (draft.features||draft.photos?.feature?block("핵심 특징","<p>"+safe(draft.features)+"</p>"+sectionImage("feature","상품 특징 사진")):"")+
+    block("상품 정보",sectionImage("composition","판매 구성 사진")+"<dl>"+row("구성",state.option)+row("원산지",draft.origin)+row("상품정보고시",draft.disclosure)+"</dl>")+
     block("배송·반품 안내",`<p>${safe(draft.returns)}</p>`)+"</div></article>";
 }
 
@@ -46,9 +51,38 @@ function detailEditor(api){
   const panel=el("studio");
   const labels={title:"상품명",body:"상세 설명",source:"공급 정보 출처",origin:"원산지",disclosure:"품목별 상품정보고시",returns:"배송·반품 안내",rights:"이미지 사용 근거 (채널·허가 문서)",imageText:"사진 속 문구 (없으면 빈칸)"};
   const fields={};
+  labels.features="핵심 특징";
   labels.stock="마켓 판매가능수량 (등록 전 필수)";
   labels.marketProfile="마켓 API 카테고리·배송·상품고시 설정 (자동 등록용 JSON)";
   let current=null, draft=null, generation=0;
+  const photoControls=[];
+  for(const [slot,title] of [["feature","특징"],["composition","구성"]]){
+    const box=document.createElement("fieldset"),legend=document.createElement("legend");
+    legend.textContent=title+" 사진";box.append(legend);
+    function input(label,type){
+      const wrap=document.createElement("label"),control=document.createElement("input");
+      control.type=type;wrap.append(label,control);box.append(wrap);return control;
+    }
+    const file=input("사진 선택 (최대 2MB)","file"),rights=input("이미지 사용 근거","text"),note=input("사진 속 문구","text"),checked=input("실물과 문구 확인","checkbox");
+    file.accept="image/png,image/jpeg";
+    const remove=document.createElement("button");remove.type="button";remove.textContent="사진 삭제";box.append(remove);
+    el("sectionPhotos").append(box);
+    function sync(){
+      const p=draft.photos?.[slot];rights.value=p?.rights??"";note.value=p?.text??"";checked.checked=!!p?.reviewed;
+      rights.disabled=note.disabled=checked.disabled=remove.disabled=!p;file.value="";
+    }
+    photoControls.push(sync);
+    file.onchange=()=>{
+      const f=file.files[0],target=draft;if(!f)return;
+      if(f.size>2097152){el("studioStatus").textContent="2MB 이하 사진을 선택하세요.";return;}
+      const reader=new FileReader();
+      reader.onload=()=>{if(target!==draft)return;(draft.photos??={})[slot]={image:reader.result,rights:"",text:"",reviewed:false};sync();render();};
+      reader.readAsDataURL(f);
+    };
+    rights.oninput=note.oninput=()=>{Object.assign(draft.photos[slot],{rights:rights.value,text:note.value,reviewed:false});checked.checked=false;render();};
+    checked.onchange=()=>{draft.photos[slot].reviewed=checked.checked;render();};
+    remove.onclick=()=>{delete draft.photos[slot];sync();render();};
+  }
   for(const [key,title] of Object.entries(labels)){
     const label=document.createElement("label"),field=document.createElement("textarea");
     label.textContent=title;label.append(field);el("studioFields").append(label);fields[key]=field;
@@ -74,6 +108,7 @@ function detailEditor(api){
   }
   function display(state){
     current=state;draft=structuredClone(state.draft);
+    for(const sync of photoControls)sync();
     for(const [key,field] of Object.entries(fields))field.value=draft[key]??"";
     el("externalId").value="";
     el("studioChecked").checked=draft.imageReviewed;el("studioFile").value="";

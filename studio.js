@@ -4,6 +4,7 @@ function generateDraft(candidate){
   const {input}=candidate;
   const evidence=candidate.evidence??{};
   return {title:[input.name,input.option].join(" "),body:[input.name,"구성 · "+input.option,input.model && "모델 · "+input.model,evidence.body].filter(Boolean).join("\n"),
+    features:[input.maker && "제조사 · "+input.maker,input.model && "모델 · "+input.model,"판매 구성 · "+input.option].filter(Boolean).join("\n"),
     stock:"",marketProfile:"",origin:evidence.origin||"",disclosure:evidence.disclosure||"",returns:evidence.returns||"",source:input.source||"",rights:evidence.rights||"",image:"",imageText:"",imageReviewed:false};
 }
 
@@ -24,10 +25,13 @@ function review(draft,candidate){
   if(![draft.title,draft.body].join(" ").includes(candidate.input.option))flag("body","승인된 구성·수량을 확인하세요.");
   if(!draft.image)flag("image","사용 허가된 상품 사진을 첨부하세요.");
   if(draft.imageReviewed!==true)flag("imageReviewed","사진 속 문구와 실물 일치 여부를 확인하세요.");
-  for(const key of ["title","body","imageText","disclosure","returns"]){
-    const match=draft[key].match(/항균|살균|효능|치료|무독성|국내\s*유일|업계\s*1위|최저가\s*보장|100\s*%\s*보장/);
+  for(const [slot,photo] of Object.entries(draft.photos??{})){
+    if(!photo.rights||!photo.reviewed)flag(slot,"사진 사용 근거를 입력하고 사진 속 문구를 확인하세요.");
+  }
+  for(const [key,value] of [...["title","body","features","imageText","disclosure","returns"].map(k=>[k,draft[k]||""]),...Object.entries(draft.photos??{}).map(([k,p])=>[k,p.text])]){
+    const match=value.match(/항균|살균|효능|치료|무독성|국내\s*유일|업계\s*1위|최저가\s*보장|100\s*%\s*보장/);
     if(match)flag(key,"‘"+match[0]+"’ 표현을 삭제하거나 확인된 중립적 사양으로 수정하세요.");
-    if(/할수 있|되여|됬/.test(draft[key]))flag(key,"띄어쓰기 또는 맞춤법을 확인하세요 (‘할 수 있’, ‘되어’, ‘됐’).");
+    if(/할수 있|되여|됬/.test(value))flag(key,"띄어쓰기 또는 맞춤법을 확인하세요 (‘할 수 있’, ‘되어’, ‘됐’).");
   }
   return issues;
 }
@@ -39,8 +43,15 @@ function normalize(draft,candidate){
     else result[key]=textValue(draft[key]);
     if(key!=="image" && String(result[key]).length>12000)throw Error("입력 문구가 너무 깁니다.");
   }
-  if(result.image){
-    const parts=result.image.match(/^data:image\/(png|jpeg);base64,([a-zA-Z0-9+/]+=*)$/);
+  if(draft.photos){
+    result.photos={};
+    for(const [slot,p] of Object.entries(draft.photos)){
+      if(!["feature","composition"].includes(slot)||!p?.image)throw Error("추가 사진 구성을 확인하세요.");
+      result.photos[slot]={image:textValue(p.image),rights:textValue(p.rights),text:textValue(p.text),reviewed:p.reviewed===true};
+    }
+  }
+  for(const image of [result.image,...Object.values(result.photos??{}).map(p=>p.image)].filter(Boolean)){
+    const parts=image.match(/^data:image\/(png|jpeg);base64,([a-zA-Z0-9+/]+=*)$/);
     if(!parts)throw Error("PNG 또는 JPEG 이미지를 선택하세요.");
     const bytes=Buffer.from(parts[2],"base64");
     const signature=parts[1]==="png"?"89504e470d0a1a0a":"ffd8ff";
