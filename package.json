@@ -1,0 +1,11 @@
+{
+  "name": "conu-commerce-admin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node --env-file-if-exists=data/admin.env server.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=24" },
+  "dependencies": { "bcryptjs": "3.0.3" }
+}

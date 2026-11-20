@@ -113,7 +113,7 @@ function createApp(filename, token) {
   const {gmarketProvider,esmReady}=require("./gmarket-provider");
   const markets={"네이버":naver,"쿠팡":coupang,"G마켓":gmarketProvider()};
   function connected(channel){
-    if(channel==="네이버")return Boolean(process.env.ACC_NAVER_ACCESS_TOKEN);
+    if(channel==="네이버")return require("./naver-auth").naverConfigured();
     if(channel==="쿠팡")return Boolean(process.env.ACC_COUPANG_SECRET&&process.env.ACC_COUPANG_KEY&&process.env.ACC_COUPANG_VENDOR);
     return channel==="G마켓"&&esmReady();
   }

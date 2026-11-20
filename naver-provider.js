@@ -1,17 +1,29 @@
 "use strict";
 
 const {detailMarkup}=require("./detail-editor");
+const {naverAuth}=require("./naver-auth");
 const base="https://api.commerce.naver.com/external";
-function naverProvider(request=fetch,token=process.env.ACC_NAVER_ACCESS_TOKEN){
-  async function call(path,method,body){
-    if(!token)throw Error("서버의 네이버 판매자 접근 토큰을 설정하세요.");
+function naverProvider(request=fetch,settings=process.env){
+  const auth=naverAuth(request,typeof settings==="string"?{ACC_NAVER_ACCESS_TOKEN:settings}:settings);
+  async function call(path,method,body,retried=false){
+    const token=await auth.token();
     const headers={Authorization:"Bearer "+token};
     if(body&&!(body instanceof FormData)){headers["Content-Type"]="application/json";body=JSON.stringify(body);}
     const res=await request(base+path,{headers,method,body,redirect:"error",signal:AbortSignal.timeout(30000)});
+    if(res.status===401){
+      auth.invalidate(token);
+      // 승인 상품의 쓰기 요청은 자동 재전송하지 않는다.
+      if(method==="GET"&&auth.automatic&&!retried)return call(path,method,body,true);
+    }
     if(!res.ok)throw Object.assign(Error("네이버 응답 "+res.status+" · 판매자센터 확인 필요"),{rejected:[400,401,403,422].includes(res.status)});
     return res.json();
   }
   return {
+    async channels(){
+      const rows=await call("/v1/seller/channels","GET");
+      if(!Array.isArray(rows))throw Error("네이버 판매 채널 응답 형식을 확인하세요.");
+      return rows.map(({name,url,channelType})=>({name,url,channelType}));
+    },
     async records(day,kind){
       const rows=[];
       if(kind==="settlements"){
