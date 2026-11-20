@@ -1,7 +1,7 @@
 "use strict";
 if(location.protocol==="http:"){
   el("candidates").hidden=false;
-  if(location.hash.length>1&&!["#sourcing","#worksheet","#candidates","#operations"].includes(location.hash)){
+  if(location.hash.length>1&&!["#sourcing","#worksheet","#candidates","#operations","#orchestration"].includes(location.hash)){
     sessionStorage.setItem("acc.admin",location.hash.slice(1));
     history.replaceState(null,"",location.pathname);
   }
@@ -38,9 +38,11 @@ if(location.protocol==="http:"){
     }catch(e){batchMessage(e.message);}finally{b.disabled=false;}
   };
   operationsPanel(api);
+  const orchestration = orchestrationPanel(api, openAnalysisDraft);
   api("/api/connections").then(result=>{
-    const names={supplier:"도매매",research:"시장조사",content:"AI 제작·검수",naver:"스마트스토어",coupang:"쿠팡",gmarket:"G마켓"};
-    el("connections").textContent=Object.entries(result).map(([k,v])=>names[k]+" "+(v?"설정됨":"미설정")).join(" · ");
+    const names={supplier:"도매매",research:"시장조사",content:"AI 제작·검수",naver:"스마트스토어",coupang:"쿠팡",gmarket:"G마켓",orchestration:"AI 상품분석"};
+    el("connections").textContent=Object.entries(result).filter(([k])=>names[k]).map(([k,v])=>names[k]+" "+(v?"설정됨":"미설정")).join(" · ");
+    if(result.orchestration)orchestration.enable();
   }).catch(e=>{el("connections").textContent=e.message;});
   function alertMessage(text){el("notice").textContent=text;}
   let batch=null, visibleCount=20, batchRequest=0;
@@ -89,6 +91,7 @@ if(location.protocol==="http:"){
     el("batchHistory").replaceChildren(...history.map(row=>new Option(row.id+"회차 · "+row.total+"건",row.id)));
     if(id)el("batchHistory").value=id;
     await readBatch();
+    window.dispatchEvent(new Event("sourcing-history-changed"));
   }
   el("batchForm").onsubmit=async event=>{
     event.preventDefault();el("collect").disabled=true;
@@ -136,6 +139,29 @@ if(location.protocol==="http:"){
     save();render();alertMessage("저장된 계산서 "+row.id+"번을 열었습니다.");
     el("product").scrollIntoView({behavior:"smooth"});
   }
+  async function openAnalysisDraft(run, candidate){
+    const mode=el("mode").value;
+    const channel=el("channel").value;
+    if(run.mode!==mode)throw Error("자료 종류를 확인하고 다시 선택하세요.");
+    const original=JSON.stringify([channel,values(),samples]);
+    const rows=await api("/api/candidates?mode="+encodeURIComponent(mode));
+    if(mode!==el("mode").value||original!==JSON.stringify([el("channel").value,values(),samples]))throw Error("계산서가 변경되었습니다. 다시 선택하세요.");
+    const latest=rows.find(row=>row.channel===candidate.channel && row.input.source===candidate.input.source && row.input.option===candidate.input.option);
+    if(!window.confirm("브라우저의 "+candidate.channel+" 계산서 입력 내용을 분석 결과로 바꿀까요? 서버에 저장된 계산서와 승인 이력은 유지됩니다."))return;
+    const input={...latest?.input,...candidate.input};
+    if(channel!==candidate.channel){
+      el("channel").value=candidate.channel;
+      el("channel").dispatchEvent(new Event("change"));
+    }
+    opened={mode,channel:candidate.channel,id:latest?.id??0,choice:latest?.choice,batchId:run.batchId,input,orchestrationCandidateId:candidate.id};
+    for(const [key,field] of Object.entries(fields))field.value=input[key]??"";
+    samples=structuredClone(candidate.validation.accepted);
+    el("checks").checked=false;
+    save();render();
+    alertMessage("분석 결과를 계산서에 불러왔습니다. 공급 조건을 확인하고 ‘현재 계산서 저장’을 누르세요.");
+    fields.name.focus({preventScroll:true});
+    el("product").scrollIntoView({behavior:"smooth"});
+  }
   async function refresh(){
     const ticket=++generation;
     const rows=await api("/api/candidates?mode="+el("mode").value);
@@ -169,6 +195,7 @@ if(location.protocol==="http:"){
         (input.source || opened.input.name===input.name);
       const payload={input,channel,mode,samples:structuredClone(samples),checks:el("checks").checked,base:same?opened.id:0,review:Boolean(same && opened.choice)};
       if(opened?.batchId&&opened.input.source===input.source&&(same||!opened.id&&!opened.input.option))payload.batchId=opened.batchId;
+      if(same&&opened.orchestrationCandidateId)payload.orchestrationCandidateId=opened.orchestrationCandidateId;
       const {id}=await api("/api/candidates",payload);
       opened={...payload,id};await refresh();alertMessage("계산서 "+id+"번을 저장했습니다.");
     }catch(e){alertMessage(e.message);}

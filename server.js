@@ -21,7 +21,7 @@ function link(value) {
   return url.href;
 }
 
-function createApp(filename, token) {
+function createApp(filename, token, {orchestrationEnabled = process.env.ACC_ORCHESTRATION_ENABLED === "1", orchestrationOptions} = {}) {
   const db = new DatabaseSync(filename);
   const studio=require("./studio").studioStore(db);
   const ops=require("./operations").operations(db,studio);
@@ -34,6 +34,7 @@ function createApp(filename, token) {
     CREATE TABLE IF NOT EXISTS decisions(version INTEGER PRIMARY KEY, choice TEXT NOT NULL,
     created TEXT DEFAULT CURRENT_TIMESTAMP);`);
   const latest = db.prepare("SELECT * FROM versions WHERE mode=? AND identity=? AND channel=? ORDER BY id DESC LIMIT 1");
+  const agentRuns = orchestrationEnabled ? require("./orchestration").orchestration(db, orchestrationOptions) : null;
   function list(mode){
     return db.prepare(`SELECT v.*,d.choice,d.created AS decided FROM versions v LEFT JOIN decisions d ON d.version=v.id
       WHERE v.mode=? AND v.id IN (SELECT MAX(id) FROM versions GROUP BY mode,identity,channel)
@@ -87,6 +88,18 @@ function createApp(filename, token) {
     const identity=JSON.stringify([source,option]);
     const previous=latest.get(mode,identity,channel);
     const snapshot={input,samples,checks,result};
+    let analysisEvidence;
+    if(data.orchestrationCandidateId != null){
+      if(Number.isSafeInteger(data.orchestrationCandidateId)) analysisEvidence=agentRuns?.linkedEvidence(data.orchestrationCandidateId, mode, channel, source, option);
+      if(!analysisEvidence) fail("분석 대상과 계산서 구성을 확인하세요.",409);
+      snapshot.orchestrationCandidateId=data.orchestrationCandidateId;
+    } else if(previous){
+      const previousData=JSON.parse(previous.body);
+      if(previousData.orchestrationCandidateId != null){
+        snapshot.orchestrationCandidateId=previousData.orchestrationCandidateId;
+        analysisEvidence=previousData.evidence;
+      }
+    }
     if(data.batchId!=null){
       const batch=db.prepare("SELECT snapshot FROM sourcing_batches WHERE id=? AND mode=?").get(data.batchId,mode);
       const product=batch&&JSON.parse(batch.snapshot).rows.find(row=>row.source===source&&(row.option===option||!row.option));
@@ -94,6 +107,7 @@ function createApp(filename, token) {
       if(product.evidence)snapshot.evidence=product.evidence;
       snapshot.batchId=data.batchId;
     }
+    if(analysisEvidence) snapshot.evidence={...snapshot.evidence,...analysisEvidence};
     if(mode==="manual" && new URL(source).hostname==="fixture.invalid") fail("모의 공급 상품은 연습 계산서에서 사용하세요.");
     const body=JSON.stringify(snapshot);
     if(previous?.body===body && !data.review) return {id:previous.id};
@@ -108,6 +122,7 @@ function createApp(filename, token) {
   const files={"/":"index.html","/index.html":"index.html","/worksheet.js":"worksheet.js","/market.js":"market.js","/candidates.js":"candidates.js"};
   files["/detail-editor.js"]="detail-editor.js";
   files["/operations-ui.js"]="operations-ui.js";
+  files["/orchestration-ui.js"]="orchestration-ui.js";
   const naver=require("./naver-provider").naverProvider();
   const coupang=require("./coupang-provider").coupangProvider();
   const {gmarketProvider,esmReady}=require("./gmarket-provider");
@@ -228,7 +243,12 @@ function createApp(filename, token) {
         try{await marketAction({version:entry.version,revision:entry.revision},false);}
         catch{/* 재조회 실패는 등록 건의 상태와 운영 이력에 기록한다. */}
       }
-    }finally{monitoring=false;if(closing)db.close();}
+    }finally{monitoring=false;if(closing)finishClose();}
+  }
+  let workerStopped = !agentRuns;
+  let dbClosed = false;
+  function finishClose(){
+    if(!monitoring && workerStopped && !dbClosed){ dbClosed=true; db.close(); }
   }
   const server=http.createServer(async(req,res)=>{
     try{
@@ -243,7 +263,7 @@ function createApp(filename, token) {
       res.setHeader("Cache-Control","no-store");
       if(req.headers.authorization!=="Bearer "+token) fail("실행 창의 관리자 링크로 접속하세요.",403);
       if(req.method==="GET"&&url.pathname==="/api/connections"){
-        return res.end(JSON.stringify({supplier:Boolean(process.env.ACC_SUPPLIER_KEY),research:Boolean(process.env.ACC_RESEARCH_URL),content:configured(),naver:connected("네이버"),coupang:connected("쿠팡"),gmarket:connected("G마켓")}));
+        return res.end(JSON.stringify({supplier:Boolean(process.env.ACC_SUPPLIER_KEY),research:Boolean(process.env.ACC_RESEARCH_URL),content:configured(),naver:connected("네이버"),coupang:connected("쿠팡"),gmarket:connected("G마켓"),orchestration:Boolean(agentRuns)}));
       }
       if(req.method==="GET" && url.pathname==="/api/batches"){
         const mode=url.searchParams.get("mode")??"fixture";
@@ -253,13 +273,29 @@ function createApp(filename, token) {
         return res.end(row.snapshot);
       }
       if(req.method==="GET" && url.pathname==="/api/candidates") return res.end(JSON.stringify(list(url.searchParams.get("mode"))));
-      if(req.method!=="POST" || !["/api/demo","/api/market-import","/api/market-submit","/api/market-read","/api/operations","/api/studio","/api/research","/api/batches","/api/candidates","/api/decision"].includes(url.pathname)) fail("지원하지 않는 요청입니다.",404);
+      const runPath = "/api/orchestration/runs";
+      const isRunList = url.pathname === runPath;
+      const runMatch = url.pathname.match(/^\/api\/orchestration\/runs\/(\d+)(?:\/(excel|supplement))?$/);
+      const mode = url.searchParams.get("mode");
+      if((isRunList || runMatch) && !agentRuns) fail("AI 상품분석이 비활성화되어 있습니다.",404);
+      if(req.method==="GET" && isRunList) return res.end(JSON.stringify(agentRuns.list(mode)));
+      if(req.method==="GET" && runMatch && runMatch[2] !== "supplement"){
+        const id=Number(runMatch[1]);
+        if(runMatch[2]!=="excel") return res.end(JSON.stringify(agentRuns.detail(id,mode)));
+        const bytes=await agentRuns.workbook(id,mode);
+        res.setHeader("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition",`attachment; filename="conu-analysis-${id}.xlsx"`);
+        return res.end(bytes);
+      }
+      if(req.method!=="POST" || !(isRunList || runMatch?.[2]==="supplement" || ["/api/demo","/api/market-import","/api/market-submit","/api/market-read","/api/operations","/api/studio","/api/research","/api/batches","/api/candidates","/api/decision"].includes(url.pathname))) fail("지원하지 않는 요청입니다.",404);
       if(req.headers.origin && req.headers.origin!=="http://"+host) fail("접근 권한이 없습니다.",403);
       let body="",size=0;
       req.setEncoding("utf8");
       const limit=url.pathname==="/api/studio"?3200000:512000;
       for await(const chunk of req){size+=Buffer.byteLength(chunk);if(size>limit) fail("입력 크기를 줄이세요.");body+=chunk;}
       const data=JSON.parse(body);
+      if(isRunList) return res.end(JSON.stringify(agentRuns.start(data)));
+      if(runMatch?.[2]==="supplement") return res.end(JSON.stringify(agentRuns.supplement(Number(runMatch[1]),data)));
       if(url.pathname==="/api/operations"&&data.action==="readSupply"){
         const entry=db.prepare("SELECT v.body FROM listings l JOIN versions v ON v.id=l.version WHERE l.id=? AND v.mode='manual'").get(data.listing);
         if(!entry||data.mode!=="manual")fail("실상품 등록 건을 확인하세요.");
@@ -300,7 +336,11 @@ function createApp(filename, token) {
   });
   const timer=setInterval(()=>monitor().catch(()=>{}),60*60*1000);
   timer.unref();
-  server.on("close",()=>{clearInterval(timer);closing=true;if(!monitoring)db.close();});
+  server.on("close",()=>{
+    clearInterval(timer);closing=true;
+    if(!agentRuns) finishClose();
+    else Promise.resolve(agentRuns.close()).finally(()=>{workerStopped=true;finishClose();});
+  });
   return server;
 }
 if(require.main===module){

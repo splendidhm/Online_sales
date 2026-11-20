@@ -102,4 +102,4 @@ function evaluate(input,samples,channel){
   result.assessment=assessCandidate(input,result,groups[basis]);
   return result;
 }
-if(typeof module!=="undefined")module.exports={evaluate,classify};
+if(typeof module!=="undefined")module.exports={evaluate,classify,feeEstimate};

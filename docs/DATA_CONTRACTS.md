@@ -1,5 +1,11 @@
 # 데이터 계약
 
+## AI 상품분석 실행
+
+관리자 인증을 사용하는 `/api/orchestration/runs`에 `mode`, `batchId`, `channels`, 채널별 `settings`(`grade` 또는 `category`, `shipping`, `top`)를 POST하면 실행 ID를 반환한다. 목록과 `/{id}` 상세는 `mode`로 자료 종류를 지정한다. 상세는 상품·채널별 상태, A~D 표본, 독립 검증 결과, 분석, 담당자 이력, 추천 순위와 승인 버전에 연결된 정산 집계를 제공한다. `/{id}/excel`은 상세 스냅숏의 XLSX다.
+
+실자료 `/{id}/supplement`는 `candidateId` 및 새 공급 확인, 확인한 표본, 반품 실비 또는 시장 설정을 받아 보완 중인 분석을 다시 대기열에 넣는다. 공급 근거는 출처, 한국시간 확인 시점, 원산지, 고시, 인증, 권리 확인 기록을 포함한다. 기존 계산서에는 명시적인 불러오기 작업으로 후보를 전달한다. `orchestrationCandidateId`는 서버에서 자료 종류·채널·공급 링크·옵션을 대조하는 출처 연결 키다. 연구 연결 키는 승인 권한을 부여하지 않는다.
+
 ## 공통 형식
 
 내부 키는 UUID, 외부 번호는 문자열로 보존한다. 시각은 시간대가 있는 UTC로 저장하고 화면에서 한국시간으로 변환한다. 금액은 KRW Decimal 문자열, 계산용 비율은 0~1 Decimal, 수량은 정수다. 미확인 값은 null과 사유를 함께 전달한다. 분석에는 source, observed_at, version(규칙 또는 모델), completeness, status, trace_id를 기록한다. 데이터 종류는 fixture(시험), manual(직접 확인), provider(연동)로 구분하고 연습 회차와 운영 회차를 분리한다.
